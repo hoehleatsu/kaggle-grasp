@@ -22,9 +22,10 @@ get_datasets <- function(subjects = 1:12, series = 1:8, base_path = "../Data/tra
       data <- read_csv(construct_filename(row[["subject"]], row[["series"]], "data"),progress=FALSE)
       if (file.exists(construct_filename(row[["subject"]], row[["series"]], "events"))) {
         events <- read_csv(construct_filename(row[["subject"]], row[["series"]], "events"),progress=FALSE)
-        data %>% left_join(events, by = "id")
+        return(data %>% left_join(events, by = "id"))
+      } else {
+        return(data)
       }
-      data
     }) %>%
     bind_rows %>%
     mutate(subject = str_match(id, "subj([[:digit:]]{1,2})")[, 2],
