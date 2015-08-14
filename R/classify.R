@@ -5,13 +5,21 @@ require("Matrix")
 ##Improved data i/o
 source("data_read.R")
 
-##Parameters for the model based L2 boosting
+Parameters for the model based L2 boosting
 param <- list(objective = "binary:logistic",
               booster = "gblinear",
               nthread = 1,
               eval_metric = "auc",
               alpha = 0.0001,
               lambda = 1)
+
+## ##Parameters for tree based base-learners
+## param <- list("objective" = "binary:logistic",
+##               "bst:eta" = 0.1,
+##               "bst:max_depth" = 9,
+##               "eval_metric" = "auc",
+##               "silent" = 0,
+##               "nthread" = 1)
 
 ##Load the training data
 eegTrain <- get_datasets(verbose=TRUE)
@@ -23,7 +31,7 @@ eegTrain <- generate_validation_training_set(eegTrain)
 dim(eegTrain)
 
 ##Data needs to be reduced (say 1%) to enable possibility to test code. Remove later
-eegTrain$is_part_of_reduced_set <- runif(nrow(eegTrain)) < 0.01
+eegTrain$is_part_of_reduced_set <- runif(nrow(eegTrain)) < 0.1
 
 ##No need for this, but we do it to reduce size of data set.
 train <- subset(eegTrain, ( is_part_of_training_set) & is_part_of_reduced_set)
@@ -40,17 +48,20 @@ classify <- function(train, test) {
 
   ##Event types
   eventTypes <- c("HandStart","FirstDigitTouch","BothStartLoadPhase","LiftOff","Replace","BothReleased")
-  ##Use all variables in the model
-  RHS <- "Fp1 + Fp2 + F7 + F3 + Fz + F4 + F8 + FC5 + FC1 + FC2 + FC6 + T7 + C3 + Cz + C4 + T8 + TP9 + CP5 + CP1 + CP2 + CP6 + TP10 + P7 + P3 + Pz + P4 + P8 + PO9 + O1 + Oz + O2 + PO10"
-  res <- list()
+
+  ##Use all variables in the model (we use an interaction with
+  ##subject, which corresponds to a separate model for each
+  ##individual)
+  RHS <- "(Fp1 + Fp2 + F7 + F3 + Fz + F4 + F8 + FC5 + FC1 + FC2 + FC6 + T7 + C3 + Cz + C4 + T8 + TP9 + CP5 + CP1 + CP2 + CP6 + TP10 + P7 + P3 + Pz + P4 + P8 + PO9 + O1 + Oz + O2 + PO10)*subject"
 
   ##Generate design matrices for use in xgboost. We use sparse.matrix, but this is not directly
   ##helpfull, coz all features are of numeric type (except maybe subject & series)
   XTrain <- sparse.model.matrix(formula, data=train)
   XTest <- sparse.model.matrix(formula, data=test)
-  ##Create predictions for test series
   for (ev in eventTypes) eegTest[,ev] <- 0 #just add the column
   XSubmission <- sparse.model.matrix(formula, data=eegTest)
+
+  res <- list()
 
   ##Fit simple glm for each event-type (atm, we ignore subject & series). This is the one-vs-all principle
   ##for multinomial data.
