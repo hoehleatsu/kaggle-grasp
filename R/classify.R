@@ -143,6 +143,8 @@ library(ggplot2)
 ggplot(data = learning_curve_df, aes(x = sample_size)) + 
   geom_line(aes(y = score_train), color = "green") + 
   geom_line(aes(y = score_test), color = "red")
+# a large gap indicates that we can benefit from more data
+# a small gap indicates that more data will not make our model better; maybe a more complex model could help
 
 ######################################################################
 
