@@ -13,6 +13,9 @@ param <- list(objective = "binary:logistic",
               alpha = 0.0001,
               lambda = 1)
 
+##Event types
+eventTypes <- c("HandStart","FirstDigitTouch","BothStartLoadPhase","LiftOff","Replace","BothReleased")
+
 ## ##Parameters for tree based base-learners
 ## param <- list("objective" = "binary:logistic",
 ##               "bst:eta" = 0.1,
@@ -44,6 +47,8 @@ features <- c("Fp1","Fp2","F7","F3","Fz","F4","F8","FC5","FC1","FC2","FC6","T7",
 meanFeatureTrain <- apply(train[,features],2,mean)
 sdFeatureTrain   <-  apply(train[,features],2,sd)
 
+# we need to be careful here. This leaks information about the future.
+# you can only use the information from other series or the data points that have already be gathered
 for (f in features) {
   train[,f] <- (train[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
   test[,f] <- (test[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
@@ -75,6 +80,71 @@ visualize <- function() {
 
   invisible()
 }
+#############################################################################
+
+# let us write learning procedures that take in a training set and return a classifier
+# doing this gives us a bit more modularity 
+# this function returns a list of classifiers indexed by the event type
+train_boost_classifier <- function(trainingSet, param = list(objective = "binary:logistic",
+                                                             booster = "gblinear",
+                                                             nthread = 1,
+                                                             eval_metric = "auc",
+                                                             alpha = 0.0001,
+                                                             lambda = 1), eventTypes = eventTypes) {
+  
+  ##Use all variables in the model (we use an interaction with
+  ##subject, which corresponds to a separate model for each
+  ##individual)
+  RHS <- paste0("(",paste0(features,collapse=" + "),")*subject")
+  
+  formula <- as.formula(paste0(eventTypes[1] , "~", RHS))
+  
+  ##Generate design matrices for use in xgboost. We use sparse.matrix, but this is not directly
+  ##helpfull, coz all features are of numeric type (except maybe subject & series)
+  XTrain <- sparse.model.matrix(formula, data = trainingSet)
+  
+  Map(function(ev) {
+    dTrain <- xgb.DMatrix(XTrain, label = as.data.frame(trainingSet)[,ev,drop=TRUE])
+    model <- xgb.train(param, dTrain, nround=100,verbose=1,print.every.n = 10, watchlist=list(train=dTrain))
+    model$formula <- formula
+    model
+  }, eventTypes)
+}
+classifiers <- train_boost_classifier(train)
+
+# then we can write a generic performance evaluation on a validation set 
+library("AUC")
+measure_auc <- function(model, data_set, true_values) {
+  auc(roc(predict(model, newdata = data_set),factor(true_values)))
+}
+measure_auc(classifiers[["HandStart"]],  
+            sparse.model.matrix(classifiers[["HandStart"]]$formula, data = test),
+            test$HandStart)
+
+# then we can also plot a learning curve (this tells us if we need more data or have a bias in our model)
+# of course simply taking the first X rows is not optimal, but ok to show what is going on
+# it also gives us some kind of bounds on performance
+learning_curve_df <- data.frame()
+sparse_test_set <- sparse.model.matrix(classifiers[["HandStart"]]$formula, data = test)
+for(no_row_offset in 1:20) {
+  sample_size <- 5000 * no_row_offset
+  training_set <- train %>% head(sample_size)
+  classifiers <- train_boost_classifier(training_set, eventTypes = "HandStart")
+  score_train <- measure_auc(classifiers[["HandStart"]],  
+                            sparse.model.matrix(classifiers[["HandStart"]]$formula, data = training_set),
+                            training_set$HandStart)
+  score_test <- measure_auc(classifiers[["HandStart"]], sparse_test_set,
+              test$HandStart)
+  learning_curve_df <- rbind(learning_curve_df, data.frame(sample_size = sample_size, 
+                                        score_train = score_train, 
+                                        score_test = score_test))
+}
+library(ggplot2)
+ggplot(data = learning_curve_df, aes(x = sample_size)) + 
+  geom_line(aes(y = score_train), color = "green") + 
+  geom_line(aes(y = score_test), color = "red")
+
+######################################################################
 
 ######################################################################
 ## Simple classification using xgboost. No feature extraction done
@@ -84,9 +154,6 @@ visualize <- function() {
 ##  train, test -
 ######################################################################
 classify <- function(train, test) {
-
-  ##Event types
-  eventTypes <- c("HandStart","FirstDigitTouch","BothStartLoadPhase","LiftOff","Replace","BothReleased")
 
   ##Use all variables in the model (we use an interaction with
   ##subject, which corresponds to a separate model for each
