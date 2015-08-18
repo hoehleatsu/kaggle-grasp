@@ -108,20 +108,21 @@ classifyBoost <- function(train, test) {
   ##individual)
   RHS <- paste0("(",paste0(features,collapse=" + "),")*subject")
 
-  formula <- as.formula(paste0(eventTypes[1] , "~", RHS))
+  formula <- as.formula(paste0("~", RHS))
 
   ##Generate design matrices for use in xgboost. We use sparse.matrix, but this is not directly
   ##helpfull, coz all features are of numeric type (except maybe subject & series)
-  XTrain <- sparse.model.matrix(formula, data=train)
-  XTest <- sparse.model.matrix(formula, data=test)
-  for (ev in eventTypes) eegTest[,ev] <- 0 #just add the column
-  XSubmission <- sparse.model.matrix(formula, data=eegTest)
+  ##not sp much help in sparse.model.matrix here - just takes a while
+  XTrain <- model.matrix(formula, data=train)
+  XTest <- model.matrix(formula, data=test)
+  for (ev in theEventTypes) eegTest[,ev] <- 0 #just add the column
+  XSubmission <- model.matrix(formula, data=eegTest)
 
   res <- list()
 
   ##Fit simple glm for each event-type (atm, we ignore subject & series). This is the one-vs-all principle
   ##for multinomial data.
-  for (ev in eventTypes) {
+  for (ev in theEventTypes) {
     cat("Type = ",ev,"\n")
     ##Formula for the logit regression model
     formula <- as.formula(paste0(ev,"~", RHS))
@@ -129,7 +130,7 @@ classifyBoost <- function(train, test) {
     dTrain <- xgb.DMatrix(XTrain, label=as.data.frame(train)[,ev,drop=TRUE])
     dTest <- xgb.DMatrix(XTest, label=as.data.frame(test)[,ev,drop=TRUE])
     ##Run xgboost using the minimum number of rounds on the full data set.
-    mBoost <- xgb.train(param, dTrain, nround=100,verbose=1,print.every.n = 10, watchlist=list(train=dTrain,test=dTest))
+    mBoost <- xgb.train(param, dTrain, nround=250,verbose=1,print.every.n = 10, watchlist=list(train=dTrain,test=dTest))
 
     ##Do the prediction
     my_predict <- predict(mBoost,newdata=XSubmission)
@@ -140,7 +141,7 @@ classifyBoost <- function(train, test) {
 
   ##Combine into one data.frame
   my_solution <- bind_cols(eegTest[,"id"],bind_cols(res))
-  colnames(my_solution) <- c("id",eventTypes)
+  colnames(my_solution) <- c("id",theEventTypes)
 
   ##Done
   return(my_solution)
@@ -155,6 +156,8 @@ classifyBoost <- function(train, test) {
 ## and it doesn't appear to react on different classes and has almost
 ## all classification into the 'HandStart' class. ToDo: Check more
 ## on neural networks.
+## Maybe check code in https://beckmw.wordpress.com/tag/nnet/ for
+## better ideas.
 ######################################################################
 
 classifyNNET <- function(train, test) {
@@ -191,8 +194,8 @@ classifyNNET <- function(train, test) {
 makeSubmission <- function(my_submission) {
   ## Reduce file size by limiting number of decimal places
   idIndex <- pmatch("id",colnames(my_submission))
-  my_submission[,-idIndex] <- round(my_submission[,-idIndex],digits=4)
-  write.csv(my_submission,file='../Results/submission1.csv',row.names=FALSE)
+  my_submission[,-idIndex] <- round(my_submission[,-idIndex],digits=6)
+  write.csv(my_submission[,c("id",theEventTypes)],file='../Results/submission1.csv',row.names=FALSE)
   zip("../Results/submission1.csv.zip",files="../Results/submission1.csv")
 }
 

@@ -23,5 +23,7 @@ visualize <- function() {
   require("FactoMineR")
   pca <- PCA(train[,features], scale.unit=FALSE, ncp=5, graph=TRUE)
 
+  prop.table(table(train$Event))
+
   invisible()
 }
