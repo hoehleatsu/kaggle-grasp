@@ -50,3 +50,39 @@ generate_validation_training_set <- function(base_data, training_set_size = 0.7)
   base_data %>%
     left_join(training_set_indicator, by = c("subject", "series"))
 }
+
+
+######################################################################
+### Action start for reading the data
+######################################################################
+
+##Load the training data (full dataset crashes R)
+eegTrain <- get_datasets(subjects=1:2, series = 1:3, verbose=TRUE)
+##Load the competition test data.
+eegTest <- get_datasets(subjects = 1:12, series = 9:10, base_path = "../Data/test", verbose=TRUE)
+
+##Add column illustrating if in validation dataset or not.
+eegTrain <- generate_validation_training_set(eegTrain)
+dim(eegTrain)
+
+##Data needs to be reduced (say 1%) to enable possibility to test code. Remove later
+eegTrain$is_part_of_reduced_set <- (runif(nrow(eegTrain)) < 0.1)
+
+##No need for this, but we do it to reduce size of data set.
+train <- subset(eegTrain, ( is_part_of_training_set) & is_part_of_reduced_set)
+test  <- subset(eegTrain, (!is_part_of_training_set) & is_part_of_reduced_set)
+
+##Features
+features <- c("Fp1","Fp2","F7","F3","Fz","F4","F8","FC5","FC1","FC2","FC6","T7","C3","Cz","C4","T8","TP9","CP5","CP1","CP2","CP6","TP10","P7","P3","Pz","P4","P8","PO9","O1","Oz","O2","PO10")
+
+##Standardize features according to mean and sd in training data.
+meanFeatureTrain <- apply(train[,features],2,mean)
+sdFeatureTrain   <-  apply(train[,features],2,sd)
+
+# we need to be careful here. This leaks information about the future.
+# you can only use the information from other series or the data points that have already be gathered
+for (f in features) {
+  train[,f] <- (train[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
+  test[,f] <- (test[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
+  eegTest[,f] <- (eegTest[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
+}

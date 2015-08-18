@@ -24,66 +24,11 @@ eventTypes <- c("HandStart","FirstDigitTouch","BothStartLoadPhase","LiftOff","Re
 ##               "silent" = 0,
 ##               "nthread" = 1)
 
-##Load the training data
-eegTrain <- get_datasets(subjects=1:2, series = 1:3, verbose=TRUE)
-##Load the competition test data.
-eegTest <- get_datasets(subjects = 1:12, series = 9:10, base_path = "../Data/test", verbose=TRUE)
 
-##Add column illustrating if in validation dataset or not.
-eegTrain <- generate_validation_training_set(eegTrain)
-dim(eegTrain)
-
-##Data needs to be reduced (say 1%) to enable possibility to test code. Remove later
-eegTrain$is_part_of_reduced_set <- (runif(nrow(eegTrain)) < 0.1)
-
-##No need for this, but we do it to reduce size of data set.
-train <- subset(eegTrain, ( is_part_of_training_set) & is_part_of_reduced_set)
-test  <- subset(eegTrain, (!is_part_of_training_set) & is_part_of_reduced_set)
-
-##Features
-features <- c("Fp1","Fp2","F7","F3","Fz","F4","F8","FC5","FC1","FC2","FC6","T7","C3","Cz","C4","T8","TP9","CP5","CP1","CP2","CP6","TP10","P7","P3","Pz","P4","P8","PO9","O1","Oz","O2","PO10")
-
-##Standardize features according to mean and sd in training data.
-meanFeatureTrain <- apply(train[,features],2,mean)
-sdFeatureTrain   <-  apply(train[,features],2,sd)
-
-# we need to be careful here. This leaks information about the future.
-# you can only use the information from other series or the data points that have already be gathered
-for (f in features) {
-  train[,f] <- (train[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
-  test[,f] <- (test[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
-  eegTest[,f] <- (eegTest[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
-}
-
-visualize <- function() {
-  ##Show correlation between features
-  require("corrplot")
-  require("caret")
-
-  corMatMy <- cor(train[,features])
-  corrplot(corMatMy, order = "hclust")
-
-  highlyCor <- findCorrelation(corMatMy,0.70)
-  ##Apply correlation filter at 0.70,
-  ##then we remove all the variable correlated with more 0.7.
-  filteredFeatures <- features[-highlyCor]
-  train.filtered <- train[,filteredFeatures]
-  corMatMy <- cor(train.filtered)
-  corrplot(corMatMy, order = "hclust")
-
-  ##Principal components
-  p <-  prcomp(train[,features])
-  print(p)
-
-  require("FactoMineR")
-  pca <- PCA(train[,features], scale.unit=FALSE, ncp=5, graph=TRUE)
-
-  invisible()
-}
 #############################################################################
 
 # let us write learning procedures that take in a training set and return a classifier
-# doing this gives us a bit more modularity 
+# doing this gives us a bit more modularity
 # this function returns a list of classifiers indexed by the event type
 train_boost_classifier <- function(trainingSet, param = list(objective = "binary:logistic",
                                                              booster = "gblinear",
@@ -91,18 +36,18 @@ train_boost_classifier <- function(trainingSet, param = list(objective = "binary
                                                              eval_metric = "auc",
                                                              alpha = 0.0001,
                                                              lambda = 1), eventTypes = eventTypes) {
-  
+
   ##Use all variables in the model (we use an interaction with
   ##subject, which corresponds to a separate model for each
   ##individual)
   RHS <- paste0("(",paste0(features,collapse=" + "),")*subject")
-  
+
   formula <- as.formula(paste0(eventTypes[1] , "~", RHS))
-  
+
   ##Generate design matrices for use in xgboost. We use sparse.matrix, but this is not directly
   ##helpfull, coz all features are of numeric type (except maybe subject & series)
   XTrain <- sparse.model.matrix(formula, data = trainingSet)
-  
+
   Map(function(ev) {
     dTrain <- xgb.DMatrix(XTrain, label = as.data.frame(trainingSet)[,ev,drop=TRUE])
     model <- xgb.train(param, dTrain, nround=100,verbose=1,print.every.n = 10, watchlist=list(train=dTrain))
@@ -112,12 +57,12 @@ train_boost_classifier <- function(trainingSet, param = list(objective = "binary
 }
 classifiers <- train_boost_classifier(train)
 
-# then we can write a generic performance evaluation on a validation set 
+# then we can write a generic performance evaluation on a validation set
 library("AUC")
 measure_auc <- function(model, data_set, true_values) {
   auc(roc(predict(model, newdata = data_set),factor(true_values)))
 }
-measure_auc(classifiers[["HandStart"]],  
+measure_auc(classifiers[["HandStart"]],
             sparse.model.matrix(classifiers[["HandStart"]]$formula, data = test),
             test$HandStart)
 
@@ -130,18 +75,18 @@ for(no_row_offset in 1:20) {
   sample_size <- 5000 * no_row_offset
   training_set <- train %>% head(sample_size)
   classifiers <- train_boost_classifier(training_set, eventTypes = "HandStart")
-  score_train <- measure_auc(classifiers[["HandStart"]],  
+  score_train <- measure_auc(classifiers[["HandStart"]],
                             sparse.model.matrix(classifiers[["HandStart"]]$formula, data = training_set),
                             training_set$HandStart)
   score_test <- measure_auc(classifiers[["HandStart"]], sparse_test_set,
               test$HandStart)
-  learning_curve_df <- rbind(learning_curve_df, data.frame(sample_size = sample_size, 
-                                        score_train = score_train, 
+  learning_curve_df <- rbind(learning_curve_df, data.frame(sample_size = sample_size,
+                                        score_train = score_train,
                                         score_test = score_test))
 }
-library(ggplot2)
-ggplot(data = learning_curve_df, aes(x = sample_size)) + 
-  geom_line(aes(y = score_train), color = "green") + 
+library("ggplot2")
+ggplot(data = learning_curve_df, aes(x = sample_size)) +
+  geom_line(aes(y = score_train), color = "green") +
   geom_line(aes(y = score_test), color = "red")
 # a large gap indicates that we can benefit from more data
 # a small gap indicates that more data will not make our model better; maybe a more complex model could help
