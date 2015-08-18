@@ -56,8 +56,8 @@ generate_validation_training_set <- function(base_data, training_set_size = 0.7)
 ### Action start for reading the data
 ######################################################################
 
-##Load the training data (full dataset crashes R)
-eegTrain <- get_datasets(subjects=1:2, series = 1:3, verbose=TRUE)
+##Load the training data (hoehle: full dataset crashes R on my computer :-()
+eegTrain <- get_datasets(subjects=1:12, series = 1:3, verbose=TRUE)
 ##Load the competition test data.
 eegTest <- get_datasets(subjects = 1:12, series = 9:10, base_path = "../Data/test", verbose=TRUE)
 
@@ -65,7 +65,14 @@ eegTest <- get_datasets(subjects = 1:12, series = 9:10, base_path = "../Data/tes
 eegTrain <- generate_validation_training_set(eegTrain)
 dim(eegTrain)
 
-##Data needs to be reduced (say 1%) to enable possibility to test code. Remove later
+##Define Event types
+theEventTypes <- c("HandStart","FirstDigitTouch","BothStartLoadPhase","LiftOff","Replace","BothReleased")
+
+##Make a factor containing the response
+whichEvent <- apply(eegTrain[, theEventTypes], 1, which.max)
+eegTrain$Event <- factor(theEventTypes[whichEvent], levels=theEventTypes)
+
+##Data needs to be reduced (say 10%) to enable possibility to test code. Remove later
 eegTrain$is_part_of_reduced_set <- (runif(nrow(eegTrain)) < 0.1)
 
 ##No need for this, but we do it to reduce size of data set.
@@ -86,3 +93,4 @@ for (f in features) {
   test[,f] <- (test[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
   eegTest[,f] <- (eegTest[,f] - meanFeatureTrain[f])/sdFeatureTrain[f]
 }
+
